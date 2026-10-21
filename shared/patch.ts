@@ -286,7 +286,7 @@ function addQuestion(draft: Scene, text: string): { ok: true; applied: AppliedOp
   const q = text.trim()
   if (!q || q.length > 200) return { ok: false, message: 'Question must be 1–200 characters.' }
   if (draft.openQuestions.some((existing) => existing.toLowerCase() === q.toLowerCase())) {
-    return { ok: false, message: 'That question is already open.' }
+    return { ok: true, applied: { op: 'question', target: q, detail: 'already open' } }
   }
   if (draft.openQuestions.length >= 12) return { ok: false, message: 'Too many open questions.' }
   draft.openQuestions.push(q)

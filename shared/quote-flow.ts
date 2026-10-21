@@ -169,8 +169,63 @@ export function buildQuoteScene(stageCount = quoteStages.length, title = 'Quote 
   return { scene, notes }
 }
 
+export function opsForCache(scene: Scene): PatchOp[] {
+  if (!has(scene, 'rating-service')) return []
+  const ops: PatchOp[] = []
+  if (!has(scene, 'pricing-cache')) ops.push(quoteStages[5]!.ops[0]!)
+  if (scene.edges.some((e) => e.id === 'e-rating-partner')) ops.push({ op: 'disconnect', id: 'e-rating-partner' })
+  if (!scene.edges.some((e) => e.id === 'e-rating-cache')) {
+    ops.push({ op: 'connect', edge: { id: 'e-rating-cache', from: 'rating-service', to: 'pricing-cache', style: 'sync' } })
+  }
+  if (has(scene, 'rating-partner') && !scene.edges.some((e) => e.id === 'e-cache-partner')) {
+    ops.push({ op: 'connect', edge: { id: 'e-cache-partner', from: 'pricing-cache', to: 'rating-partner', style: 'sync', label: 'miss' } })
+  }
+  return ops
+}
+
+export function opsForEvents(scene: Scene): PatchOp[] {
+  const ops: PatchOp[] = []
+  if (scene.edges.some((e) => e.id === 'e-store-policy')) ops.push({ op: 'disconnect', id: 'e-store-policy' })
+  if (!has(scene, 'quote-events')) ops.push(addOp(quoteStages[6]!, 'quote-events'))
+  if (!scene.edges.some((e) => e.from === 'quote-service' && e.to === 'quote-events')) {
+    ops.push({ op: 'connect', edge: { id: 'e-quote-events', from: 'quote-service', to: 'quote-events', style: 'event', label: 'QuoteCreated' } })
+  }
+  if (has(scene, 'policy-service') && !scene.edges.some((e) => e.from === 'quote-events' && e.to === 'policy-service')) {
+    ops.push({ op: 'connect', edge: { id: 'e-events-policy', from: 'quote-events', to: 'policy-service', style: 'event' } })
+  }
+  return ops
+}
+
+export function opsForRetry(scene: Scene): PatchOp[] {
+  const ops: PatchOp[] = []
+  if (!has(scene, 'retry-worker')) ops.push(addOp(quoteStages[6]!, 'retry-worker'))
+  if (!has(scene, 'dead-letter')) ops.push(addOp(quoteStages[6]!, 'dead-letter'))
+  if (!has(scene, 'quote-events')) ops.push(...opsForEvents(scene))
+  if (!scene.edges.some((e) => e.from === 'quote-events' && e.to === 'retry-worker')) {
+    ops.push({ op: 'connect', edge: { id: 'e-events-retry', from: 'quote-events', to: 'retry-worker', style: 'async', label: 'backoff' } })
+  }
+  if (!scene.edges.some((e) => e.from === 'retry-worker' && e.to === 'dead-letter')) {
+    ops.push({ op: 'connect', edge: { id: 'e-retry-dlq', from: 'retry-worker', to: 'dead-letter', style: 'async', label: 'DLQ' } })
+  }
+  return ops
+}
+
+export function opsForBulkhead(workers: number): PatchOp[] {
+  return [{ op: 'update', id: 'rating-service', patch: { behaviour: { concurrency: workers } } }]
+}
+
 export function policyMachinePatch(): PatchOp {
   return { op: 'update', id: 'policy-service', patch: { machine: policyMachine, notes: 'Policy state machine. Shape only.' } }
+}
+
+function has(scene: Scene, id: string): boolean {
+  return scene.components.some((c) => c.id === id)
+}
+
+function addOp(stage: QuoteStage, id: string): PatchOp {
+  const op = stage.ops.find((item) => item.op === 'add' && item.component.id === id)
+  if (!op || op.op !== 'add') throw new Error(`Missing add ${id}`)
+  return op
 }
 
 function add(

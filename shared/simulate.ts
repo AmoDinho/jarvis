@@ -29,7 +29,7 @@ export function simulate(scene: Scene, scenario: Scenario): SimResult {
   const durationS = clamp(scenario.durationS ?? 30, 1, 120)
   const rps = clamp(scenario.rps ?? (scenario.mode === 'load' ? 500 : 1), 0.1, 100_000)
   const samples = scenario.mode === 'load' ? runLoad(scene, scenario.entry, rps, durationS, faults) : []
-  const summary = summarise(scene, scenario, hops, baselineMs, samples, rps, durationS, faults)
+  const summary = summarise(scene, scenario, hops, baselineMs, samples, rps, faults)
   const steps = buildSteps(scene, scenario, hops)
   return {
     illustrative: true,
@@ -214,7 +214,6 @@ function summarise(
   baselineMs: number,
   samples: SimSample[],
   rps: number,
-  durationS: number,
   faults: Map<string, NonNullable<Scenario['faults']>[number]>,
 ): SimResult['summary'] {
   const last = samples[samples.length - 1]
