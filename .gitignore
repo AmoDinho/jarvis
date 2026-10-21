@@ -147,3 +147,9 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# JARVIS session data (generated locally; may contain design notes)
+sessions/*
+!sessions/.gitkeep
+
+.DS_Store
