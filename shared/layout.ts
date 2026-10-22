@@ -73,8 +73,9 @@ export function orbitalLayout(scene: Scene): Record<string, Point> {
 
 const REGIONS: Record<string, { x: number; y: number }> = {
   edge: { x: -0.62, y: -0.28 },
-  quoting: { x: 0.02, y: 0.08 },
-  policy: { x: 0.58, y: -0.02 },
+  builds: { x: 0.02, y: 0.08 },
+  release: { x: 0.58, y: -0.02 },
+  reviews: { x: -0.18, y: 0.48 },
   external: { x: 0.48, y: -0.52 },
   events: { x: 0.42, y: 0.22 },
 }

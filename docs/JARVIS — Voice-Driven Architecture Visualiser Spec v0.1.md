@@ -74,7 +74,7 @@ type Edge = {
   id: string;
   from: string; to: string;
   style: 'sync' | 'async' | 'event' | 'stream';
-  label?: string;            // e.g. 'POST /quotes', 'QuoteCreated'
+  label?: string;            // e.g. 'POST /builds', 'BuildFinished'
 };
 
 type Decision = {
@@ -126,9 +126,9 @@ Simulations run in the browser as a discrete-event model over the scene graph, u
 
 | Mode | I say something like | What runs | What I see |
 | --- | --- | --- | --- |
-| Flow | "Walk a quote request through it" | One request traced along the edges, sync and async branches | A glowing packet moving through the HUD, per-hop latency ticking up |
-| Failure and load | "What happens at 500 rps if the rating service is slow?" | Arrival rate ramped, one component degraded, queues and retries modelled | Components heating from cyan to amber to red, queue depths rising, the first thing to break flashing |
-| Step-through | "Step through the policy state machine" | A sequence or state machine advanced one event at a time | Arrow-key stepping, current state lit, transition named in the readout |
+| Flow | "Walk a publish request through it" | One request traced along the edges, sync and async branches | A glowing packet moving through the HUD, per-hop latency ticking up |
+| Failure and load | "What happens at 500 rps if the compile service is slow?" | Arrival rate ramped, one component degraded, queues and retries modelled | Components heating from cyan to amber to red, queue depths rising, the first thing to break flashing |
+| Step-through | "Step through the release state machine" | A sequence or state machine advanced one event at a time | Arrow-key stepping, current state lit, transition named in the readout |
 
 `run_simulation` takes a scenario (`{ mode, entry, rps?, durationS?, faults?: [{ component, mode, factor }] }`) and returns a result summary (end-to-end latency, throughput, the bottleneck, failed requests). Claude speaks the summary and logs anything that changes the design as a decision.
 
@@ -140,7 +140,7 @@ Each session starts in one of two modes, chosen with a toggle before the first t
 
 **Blank slate.** Claude has no tools beyond the scene tools. Good for greenfield ideas and for keeping sessions fast.
 
-**Grounded.** The server adds read-only MCP servers to the Claude API call so Claude can look at real structure: the repo search and GraphQL schema servers I already have connected. Claude can seed the scene from what exists ("load the quote flow as it is today") and then we design the change on top.
+**Grounded.** The server adds read-only MCP servers to the Claude API call so Claude can look at real structure: the repo search and GraphQL schema servers I already have connected. Claude can seed the scene from what exists ("load the publish flow as it is today") and then we design the change on top.
 
 Grounded mode follows one hard rule: it reads code, schemas, and system structure only, never live data, logs or records that could contain customer PII. In practice:
 

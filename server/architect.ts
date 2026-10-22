@@ -2,14 +2,14 @@ import type { ComponentKind, PatchOp, Scenario, Scene, ViewName } from '../share
 import { findComponent } from '../shared/patch.ts'
 import { slugify } from '../shared/format.ts'
 import {
-  QUOTE_SATELLITES,
+  PUBLISH_SATELLITES,
   opsForBulkhead,
   opsForCache,
   opsForEvents,
   opsForRetry,
-  policyMachinePatch,
-  quoteStages,
-} from '../shared/quote-flow.ts'
+  publishStages,
+  releaseMachinePatch,
+} from '../shared/publish-flow.ts'
 
 export type TurnPlan = {
   sentences: string[]
@@ -26,28 +26,28 @@ export type TurnPlan = {
 
 const STORY_DECISIONS: NonNullable<TurnPlan['decisions']> = [
   {
-    chose: 'Split rating out of quote service',
+    chose: 'Split compile out of build service',
     rejected: ['Keep one service'],
-    because: 'Rating changes weekly, quoting rarely',
-    affects: ['rating-service', 'quote-service'],
+    because: 'Compile changes weekly, the build API rarely',
+    affects: ['compile-service', 'build-service'],
   },
   {
-    chose: 'Pricing cache in front of the partner',
-    rejected: ['Call the partner every time'],
-    because: 'Repeat risks are common and partner latency is the long pole',
-    affects: ['pricing-cache', 'rating-partner'],
+    chose: 'Artifact cache in front of the registry',
+    rejected: ['Call the registry every time'],
+    because: 'Repeat sources are common and registry latency is the long pole',
+    affects: ['artifact-cache', 'package-registry'],
   },
   {
-    chose: 'Emit QuoteCreated as an event',
-    rejected: ['Policy polls the quote store'],
-    because: 'Policy should not read another domain’s tables',
-    affects: ['quote-service', 'policy-service'],
+    chose: 'Emit BuildFinished as an event',
+    rejected: ['Release polls the build store'],
+    because: 'Release should not read another domain’s tables',
+    affects: ['build-service', 'release-service'],
   },
   {
     chose: 'Retry worker with backoff, then dead-letter',
-    rejected: ['Inline retries in quote service'],
+    rejected: ['Inline retries in build service'],
     because: 'Keeps the request path fast when delivery fails',
-    affects: ['retry-worker', 'quote-events'],
+    affects: ['retry-worker', 'build-events'],
   },
 ]
 
@@ -94,11 +94,11 @@ export function planTurn(input: {
     return { ...say([`Opening ${view === 'warroom' ? 'the war room' : view}.`, 'The scene is unchanged.']), view }
   }
 
-  if (/\b(assemble the quote flow demo|build the mockup scene|full quote flow demo)\b/.test(n)) {
+  if (/\b(assemble the publish flow demo|build the mockup scene|full publish flow demo)\b/.test(n)) {
     return assembleDemo(scene)
   }
 
-  if (/\b(load the quote flow|quote flow as it is|as it is today|seed the scene|load today)\b/.test(n)) {
+  if (/\b(load the publish flow|publish flow as it is|as it is today|seed the scene|load today)\b/.test(n)) {
     return loadToday(scene, input.mode)
   }
 
@@ -130,7 +130,7 @@ export function planTurn(input: {
 
   if (/\b(what happens|load|rps|requests per second|saturat)\b/.test(n)) {
     const entry = entryOf(scene, n)
-    if (!entry) return say(['I need an entry point before I can run load.', 'Add a client, or load the quote flow.'])
+    if (!entry) return say(['I need an entry point before I can run load.', 'Add a client, or load the publish flow.'])
     return {
       sentences: [],
       batches: [],
@@ -150,7 +150,7 @@ export function planTurn(input: {
     return bulkhead(scene, n)
   }
 
-  if (/\b(pricing cache|cache in front|put a cache|add a cache)\b/.test(n)) {
+  if (/\b(artifact cache|cache in front|put a cache|add a cache)\b/.test(n)) {
     return cache(scene)
   }
 
@@ -158,11 +158,11 @@ export function planTurn(input: {
     return retry(scene, n)
   }
 
-  if (/\b(emit|quote created|quotecreated|as an event)\b/.test(n)) {
+  if (/\b(emit|build finished|buildfinished|as an event)\b/.test(n)) {
     return events(scene)
   }
 
-  if (/\b(open question|leave (this|these) open|should the|should we|who owns|is reinstatement)\b/.test(n)) {
+  if (/\b(open question|leave (this|these) open|should the|should we|who owns|is republish)\b/.test(n)) {
     return questions(text, n)
   }
 
@@ -182,8 +182,8 @@ export function planTurn(input: {
     return connect(scene, n)
   }
 
-  if (/\bsplit\b/.test(n) && /\brating\b/.test(n)) {
-    return splitRating(scene)
+  if (/\bsplit\b/.test(n) && /\bcompile\b/.test(n)) {
+    return splitCompile(scene)
   }
 
   if (/\badd\b/.test(n) || scene.components.length === 0) {
@@ -196,40 +196,40 @@ export function planTurn(input: {
 
   return say([
     'I can add a part, connect two of them, or run a flow.',
-    'Try “load the quote flow as it is today”, or name a service and I will place it.',
+    'Try “load the publish flow as it is today”, or name a service and I will place it.',
   ])
 }
 
 function assembleDemo(scene: Scene): TurnPlan {
   if (scene.components.length) {
-    return say(['This session already has a scene.', 'Start a new one if you want the full quote-flow demo from an empty grid.'])
+    return say(['This session already has a scene.', 'Start a new one if you want the full publish-flow demo from an empty grid.'])
   }
-  const batches = quoteStages.map((stage) => ({ why: stage.why, ops: stage.ops }))
+  const batches = publishStages.map((stage) => ({ why: stage.why, ops: stage.ops }))
   batches.push({
-    why: 'Partner bulkhead',
+    why: 'Registry bulkhead',
     ops: [
       ...opsForBulkhead(32),
-      { op: 'question', text: 'Should the cache key include the postcode?' },
-      { op: 'question', text: 'Is reinstatement from Lapsed in scope?' },
+      { op: 'question', text: 'Should the cache key include the lockfile hash?' },
+      { op: 'question', text: 'Is republish from rolled back in scope?' },
       { op: 'question', text: 'Who owns the dead-letter queue alerts?' },
-      { op: 'satellites', satellites: QUOTE_SATELLITES },
-      { op: 'focus', id: 'quote-service' },
+      { op: 'satellites', satellites: PUBLISH_SATELLITES },
+      { op: 'focus', id: 'build-service' },
     ],
   })
   return {
     sentences: [
-      'Assembled the quote flow through the partner bulkhead.',
-      'Eight versions, from the first client to the cache, the event, and thirty-two rating workers.',
+      'Assembled the publish flow through the registry bulkhead.',
+      'Eight versions, from the first client to the cache, the event, and thirty-two compile workers.',
       'Ask me to walk a request, or what happens at five hundred requests a second.',
     ],
     batches,
     decisions: [
       ...STORY_DECISIONS,
       {
-        chose: 'Bulkhead the partner call to 32 workers',
-        rejected: ['Raise rating capacity without a limit'],
-        because: 'The load simulation saturates rating first',
-        affects: ['rating-service', 'rating-partner'],
+        chose: 'Bulkhead the registry call to 32 workers',
+        rejected: ['Raise compile capacity without a limit'],
+        because: 'The load simulation saturates compile first',
+        affects: ['compile-service', 'package-registry'],
       },
     ],
     view: 'orbital',
@@ -238,29 +238,29 @@ function assembleDemo(scene: Scene): TurnPlan {
 }
 
 function loadToday(scene: Scene, mode: 'blank' | 'grounded'): TurnPlan {
-  const stages = quoteStages.slice(0, 5).filter((stage) => stage.ops.some((op) => op.op === 'add' && !scene.components.some((c) => c.id === op.component.id)))
+  const stages = publishStages.slice(0, 5).filter((stage) => stage.ops.some((op) => op.op === 'add' && !scene.components.some((c) => c.id === op.component.id)))
   if (!stages.length) {
     return {
-      ...say(['The quote flow is already on the board.', 'I can walk a request, or we can change it.']),
+      ...say(['The publish flow is already on the board.', 'I can walk a request, or we can change it.']),
       view: mode === 'grounded' ? 'constellation' : 'orbital',
     }
   }
   const batches = stages.map((stage) => ({ why: stage.why, ops: stage.ops }))
   if (mode === 'grounded') {
-    batches.push({ why: 'Shape stars', ops: [{ op: 'satellites', satellites: QUOTE_SATELLITES }, { op: 'focus', id: 'quote-service' }] })
+    batches.push({ why: 'Shape stars', ops: [{ op: 'satellites', satellites: PUBLISH_SATELLITES }, { op: 'focus', id: 'build-service' }] })
   }
   const grounded = mode === 'grounded'
   return {
     sentences: grounded
       ? [
-          'Loaded the quote flow as it stands today.',
-          'A client hits the gateway, quote service prices through rating and the partner, and policy still polls the store.',
+          'Loaded the publish flow as it stands today.',
+          'A client hits the gateway, build service compiles through the registry, and release still polls the store.',
           'Shape only. No records, no logs, no example values.',
         ]
       : [
-          'Sketched the quote flow from a blank slate.',
-          'Client, gateway, quote service, store, rating and the partner. Policy still polls the store.',
-          'We can put a cache in front of the partner whenever you want.',
+          'Sketched the publish flow from a blank slate.',
+          'Client, gateway, build service, store, compile and the registry. Release still polls the store.',
+          'We can put a cache in front of the registry whenever you want.',
         ],
     batches,
     view: grounded ? 'constellation' : 'orbital',
@@ -269,11 +269,11 @@ function loadToday(scene: Scene, mode: 'blank' | 'grounded'): TurnPlan {
 }
 
 function stepMachine(scene: Scene, n: string): TurnPlan {
-  const target = mentionedComponent(scene, n) ?? scene.components.find((c) => c.id === 'policy-service')
+  const target = mentionedComponent(scene, n) ?? scene.components.find((c) => c.id === 'release-service')
   if (!target) return say(['There is no component to step yet.', 'Add a service, then ask me to step its machine.'])
   const batches: TurnPlan['batches'] = []
-  if (!target.machine && target.id === 'policy-service') {
-    batches.push({ why: 'Policy state machine', ops: [policyMachinePatch(), { op: 'focus', id: 'policy-service' }] })
+  if (!target.machine && target.id === 'release-service') {
+    batches.push({ why: 'Release state machine', ops: [releaseMachinePatch(), { op: 'focus', id: 'release-service' }] })
   } else if (!target.machine) {
     return say([`${target.label} has no state machine.`, 'I can step a request through the graph instead. Say walk a request.'])
   }
@@ -286,21 +286,21 @@ function stepMachine(scene: Scene, n: string): TurnPlan {
 }
 
 function bulkhead(scene: Scene, n: string): TurnPlan {
-  if (!scene.components.some((c) => c.id === 'rating-service')) {
-    return say(['There is no rating service to bulkhead.', 'Split rating out first, then cap its workers.'])
+  if (!scene.components.some((c) => c.id === 'compile-service')) {
+    return say(['There is no compile service to bulkhead.', 'Split compile out first, then cap its workers.'])
   }
   const workers = numberAfter(n, /(\d+)\s*workers/) ?? numberAfter(n, /to\s*(\d+)/) ?? 32
-  const affects = ['rating-service', scene.components.some((c) => c.id === 'rating-partner') ? 'rating-partner' : ''].filter(Boolean)
+  const affects = ['compile-service', scene.components.some((c) => c.id === 'package-registry') ? 'package-registry' : ''].filter(Boolean)
   return {
     sentences: [
-      `Rating is capped at ${workers} workers, so the partner call cannot take the whole quote path with it.`,
+      `Compile is capped at ${workers} workers, so the registry call cannot take the whole publish path with it.`,
       'I logged that against leaving the fan-out unbounded.',
     ],
-    batches: [{ why: 'Partner bulkhead', ops: [...opsForBulkhead(workers), { op: 'focus', id: 'rating-service' }] }],
+    batches: [{ why: 'Registry bulkhead', ops: [...opsForBulkhead(workers), { op: 'focus', id: 'compile-service' }] }],
     decision: {
-      chose: `Bulkhead the partner call to ${workers} workers`,
-      rejected: ['Raise rating capacity without a limit'],
-      because: 'The load simulation saturates rating first',
+      chose: `Bulkhead the registry call to ${workers} workers`,
+      rejected: ['Raise compile capacity without a limit'],
+      because: 'The load simulation saturates compile first',
       affects,
     },
     view: 'orbital',
@@ -310,45 +310,45 @@ function bulkhead(scene: Scene, n: string): TurnPlan {
 function cache(scene: Scene): TurnPlan {
   const ops = opsForCache(scene)
   if (!ops.length) {
-    return say(['I need a rating service before a pricing cache means anything.', 'Split rating out, then ask again.'])
+    return say(['I need a compile service before an artifact cache means anything.', 'Split compile out, then ask again.'])
   }
-  if (scene.components.some((c) => c.id === 'pricing-cache') && ops.every((op) => op.op === 'connect' || op.op === 'disconnect') && ops.length === 0) {
-    return say(['The pricing cache is already in front of the partner.', 'I can walk a request if you want to see the miss path.'])
+  if (scene.components.some((c) => c.id === 'artifact-cache') && ops.every((op) => op.op === 'connect' || op.op === 'disconnect') && ops.length === 0) {
+    return say(['The artifact cache is already in front of the registry.', 'I can walk a request if you want to see the miss path.'])
   }
   return {
     sentences: [
-      'Pricing cache now sits in front of the partner.',
-      'Repeat risks skip the long call. A miss still goes out.',
-      'I logged that against calling the partner every time.',
+      'Artifact cache now sits in front of the registry.',
+      'Repeat sources skip the long call. A miss still goes out.',
+      'I logged that against calling the registry every time.',
     ],
-    batches: [{ why: 'Pricing cache', ops: [...ops, { op: 'focus', id: 'pricing-cache' }] }],
+    batches: [{ why: 'Artifact cache', ops: [...ops, { op: 'focus', id: 'artifact-cache' }] }],
     decision: {
-      chose: 'Pricing cache in front of the partner',
-      rejected: ['Call the partner every time'],
-      because: 'Repeat risks are common and partner latency is the long pole',
-      affects: ['pricing-cache', 'rating-partner'].filter((id) => scene.components.some((c) => c.id === id) || id === 'pricing-cache'),
+      chose: 'Artifact cache in front of the registry',
+      rejected: ['Call the registry every time'],
+      because: 'Repeat sources are common and registry latency is the long pole',
+      affects: ['artifact-cache', 'package-registry'].filter((id) => scene.components.some((c) => c.id === id) || id === 'artifact-cache'),
     },
   }
 }
 
 function events(scene: Scene): TurnPlan {
-  if (!scene.components.some((c) => c.id === 'quote-service')) {
-    return say(['Quote service is not on the board yet.', 'Add it, then I can emit QuoteCreated.'])
+  if (!scene.components.some((c) => c.id === 'build-service')) {
+    return say(['Build service is not on the board yet.', 'Add it, then I can emit BuildFinished.'])
   }
   const ops = opsForEvents(scene)
-  if (!ops.length) return say(['QuoteCreated is already an event.', 'Policy is off the store poll.'])
+  if (!ops.length) return say(['BuildFinished is already an event.', 'Release is off the store poll.'])
   return {
     sentences: [
-      'Quote creation now emits QuoteCreated.',
-      'Policy can hear it without reading the quote tables.',
+      'A finished build now emits BuildFinished.',
+      'Release can hear it without reading the build tables.',
       'I logged that against the poll.',
     ],
-    batches: [{ why: 'QuoteCreated event', ops }],
+    batches: [{ why: 'BuildFinished event', ops }],
     decision: {
-      chose: 'Emit QuoteCreated as an event',
-      rejected: ['Policy polls the quote store'],
-      because: 'Policy should not read another domain’s tables',
-      affects: ['quote-service', 'policy-service'].filter((id) => scene.components.some((c) => c.id === id) || id === 'quote-service'),
+      chose: 'Emit BuildFinished as an event',
+      rejected: ['Release polls the build store'],
+      because: 'Release should not read another domain’s tables',
+      affects: ['build-service', 'release-service'].filter((id) => scene.components.some((c) => c.id === id) || id === 'build-service'),
     },
   }
 }
@@ -356,8 +356,8 @@ function events(scene: Scene): TurnPlan {
 function retry(scene: Scene, n: string): TurnPlan {
   const withEvent = /\bevent\b/.test(n) || /\bemit\b/.test(n)
   const ops = [...(withEvent ? opsForEvents(scene) : []), ...opsForRetry(scene)]
-  if (!scene.components.some((c) => c.id === 'quote-service') && !scene.components.some((c) => c.id === 'quote-events')) {
-    return say(['I need the quote path before a retry worker has anything to catch.', 'Load the flow, or add quote service.'])
+  if (!scene.components.some((c) => c.id === 'build-service') && !scene.components.some((c) => c.id === 'build-events')) {
+    return say(['I need the publish path before a retry worker has anything to catch.', 'Load the flow, or add build service.'])
   }
   return {
     sentences: [
@@ -367,9 +367,9 @@ function retry(scene: Scene, n: string): TurnPlan {
     batches: [{ why: 'Retry then dead-letter', ops: ops.length ? ops : [{ op: 'focus', id: 'retry-worker' }] }],
     decision: {
       chose: 'Retry worker with backoff, then dead-letter',
-      rejected: ['Inline retries in quote service'],
+      rejected: ['Inline retries in build service'],
       because: 'Keeps the request path fast when delivery fails',
-      affects: ['retry-worker', 'quote-events'],
+      affects: ['retry-worker', 'build-events'],
     },
     escalate: { componentId: 'retry-worker', why: 'How the retry worker backs off, then dead-letters.' },
   }
@@ -448,22 +448,22 @@ function connect(scene: Scene, n: string): TurnPlan {
   }
 }
 
-function splitRating(scene: Scene): TurnPlan {
-  if (scene.components.some((c) => c.id === 'rating-service')) {
-    return say(['Rating is already its own service.', 'I can connect it, or walk a request through it.'])
+function splitCompile(scene: Scene): TurnPlan {
+  if (scene.components.some((c) => c.id === 'compile-service')) {
+    return say(['Compile is already its own service.', 'I can connect it, or walk a request through it.'])
   }
-  if (!scene.components.some((c) => c.id === 'quote-service')) {
-    return say(['Add quote service first.', 'Then I can split rating out of it.'])
+  if (!scene.components.some((c) => c.id === 'build-service')) {
+    return say(['Add build service first.', 'Then I can split compile out of it.'])
   }
-  const stage = quoteStages.find((item) => item.id === 'rating')!
+  const stage = publishStages.find((item) => item.id === 'compile')!
   return {
-    sentences: ['Rating is its own service now.', 'Quote still calls it, synchronously, until we change that.'],
+    sentences: ['Compile is its own service now.', 'Build still calls it, synchronously, until we change that.'],
     batches: [{ why: stage.why, ops: stage.ops }],
     decision: {
-      chose: 'Split rating out of quote service',
+      chose: 'Split compile out of build service',
       rejected: ['Keep one service'],
-      because: 'Rating changes weekly, quoting rarely',
-      affects: ['rating-service', 'quote-service'],
+      because: 'Compile changes weekly, the build API rarely',
+      affects: ['compile-service', 'build-service'],
     },
   }
 }
@@ -543,14 +543,14 @@ function faultsFrom(scene: Scene, n: string): Scenario['faults'] {
   if (!mode) return undefined
   const factor = numberAfter(n, /(?:x|times)\s*(\d+(?:\.\d+)?)/) ?? numberAfter(n, /(\d+(?:\.\d+)?)\s*times/) ?? (mode === 'timeout' ? 8 : 4)
   const hinted = mentionedComponent(scene, n.replace(/\d+/g, ''))
-  const component = hinted?.id ?? (n.includes('rating') ? 'rating-service' : n.includes('partner') ? 'rating-partner' : n.includes('gateway') ? 'api-gateway' : scene.focus)
+  const component = hinted?.id ?? (n.includes('compile') ? 'compile-service' : n.includes('registry') ? 'package-registry' : n.includes('gateway') ? 'api-gateway' : scene.focus)
   if (!component || !scene.components.some((c) => c.id === component)) return undefined
   return [{ component, mode, factor }]
 }
 
 function entryOf(scene: Scene, n: string): string | undefined {
   if (/\bfrom the gateway\b/.test(n)) return scene.components.find((c) => c.kind === 'gateway')?.id
-  if (/\bfrom the client\b/.test(n) || /\bquote request\b/.test(n) || /\bweb client\b/.test(n)) {
+  if (/\bfrom the client\b/.test(n) || /\bpublish request\b/.test(n) || /\bbuild request\b/.test(n) || /\bweb client\b/.test(n)) {
     return scene.components.find((c) => c.id === 'web-client')?.id ?? scene.components.find((c) => c.kind === 'client')?.id
   }
   return scene.components.find((c) => c.kind === 'client')?.id ?? scene.components[0]?.id
@@ -559,29 +559,29 @@ function entryOf(scene: Scene, n: string): string | undefined {
 function mentionedComponent(scene: Scene, hint: string) {
   const cleaned = hint.toLowerCase()
   const alias: [string, string][] = [
-    ['rating partner', 'rating-partner'],
-    ['the partner', 'rating-partner'],
-    ['partner', 'rating-partner'],
-    ['pricing cache', 'pricing-cache'],
-    ['the cache', 'pricing-cache'],
-    ['cache', 'pricing-cache'],
-    ['rating service', 'rating-service'],
-    ['rating', 'rating-service'],
-    ['quote service', 'quote-service'],
-    ['quote', 'quote-service'],
+    ['package registry', 'package-registry'],
+    ['the registry', 'package-registry'],
+    ['registry', 'package-registry'],
+    ['artifact cache', 'artifact-cache'],
+    ['the cache', 'artifact-cache'],
+    ['cache', 'artifact-cache'],
+    ['compile service', 'compile-service'],
+    ['compile', 'compile-service'],
+    ['build service', 'build-service'],
+    ['build store', 'build-store'],
     ['api gateway', 'api-gateway'],
     ['gateway', 'api-gateway'],
     ['web client', 'web-client'],
     ['client', 'web-client'],
-    ['quote store', 'quote-store'],
-    ['store', 'quote-store'],
-    ['policy service', 'policy-service'],
-    ['policy', 'policy-service'],
+    ['release service', 'release-service'],
+    ['release', 'release-service'],
     ['retry worker', 'retry-worker'],
     ['retry', 'retry-worker'],
     ['dead letter', 'dead-letter'],
-    ['quote events', 'quote-events'],
-    ['events', 'quote-events'],
+    ['build events', 'build-events'],
+    ['events', 'build-events'],
+    ['build', 'build-service'],
+    ['store', 'build-store'],
   ]
   for (const [needle, id] of alias) {
     if (cleaned.includes(needle)) {

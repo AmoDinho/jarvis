@@ -8,7 +8,7 @@ describe('layout', () => {
     let scene = emptyScene('wide')
     const ops = []
     for (let i = 0; i < 24; i++) {
-      const group = ['quoting', 'policy', 'edge', 'external'][i % 4]!
+      const group = ['builds', 'release', 'edge', 'external'][i % 4]!
       ops.push({
         op: 'add' as const,
         component: {

@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { writeFile } from 'node:fs/promises'
-import { buildQuoteScene } from '../shared/quote-flow.ts'
+import { publishStages } from '../shared/publish-flow.ts'
 import { buildSpec } from '../shared/spec.ts'
 import type { PatchOp } from '../shared/types.ts'
 import { sceneSvg } from './diagram.ts'
@@ -10,21 +10,23 @@ export async function ensureSamples(store: SessionStore): Promise<void> {
   const existing = await store.list()
   if (existing.some((session) => !session.sample) || existing.length) return
 
-  await quoteV1(store)
-  await policyRenewal(store)
-  await claimsFnol(store)
+  await publishV1(store)
+  await releasePromotion(store)
+  await reviewIntake(store)
 }
 
-async function quoteV1(store: SessionStore): Promise<void> {
+async function publishV1(store: SessionStore): Promise<void> {
   const session = await store.create({
-    title: 'Quote flow v1',
+    title: 'Publish flow v1',
     mode: 'grounded',
     at: '2026-10-12T10:00:00.000Z',
     sample: true,
   })
-  const built = buildQuoteScene(4, 'Quote flow v1')
-  session.scene = built.scene
-  session.versionNotes = built.notes
+  for (const stage of publishStages.slice(0, 4)) {
+    const applied = await store.applyOps(session, stage.ops, stage.why)
+    if (!applied.ok) throw new Error(applied.message)
+  }
+  session.scene = { ...session.scene, title: 'Publish flow v1' }
   session.spec = buildSpec({
     scene: session.scene,
     folder: path.relative(process.cwd(), session.folder),
@@ -32,7 +34,7 @@ async function quoteV1(store: SessionStore): Promise<void> {
     startedAt: session.createdAt,
     turns: 6,
     simulations: [],
-    evolution: built.notes,
+    evolution: session.versionNotes,
     files: [{ name: 'spec.md', note: 'markdown' }],
   })
   await writeFile(path.join(session.folder, 'spec.md'), session.spec.markdown)
@@ -40,41 +42,41 @@ async function quoteV1(store: SessionStore): Promise<void> {
   await store.save(session)
 }
 
-async function policyRenewal(store: SessionStore): Promise<void> {
+async function releasePromotion(store: SessionStore): Promise<void> {
   const session = await store.create({
-    title: 'Policy renewal',
+    title: 'Release promotion',
     mode: 'blank',
     at: '2026-10-13T10:00:00.000Z',
     sample: true,
   })
   const batches: { why: string; ops: PatchOp[] }[] = [
     {
-      why: 'Renewal client and gateway',
+      why: 'Rollout client and gateway',
       ops: [
-        { op: 'add', component: { id: 'renewal-client', kind: 'client', label: 'Renewal client', group: 'edge', behaviour: { latencyMs: 30, capacityRps: 200, failureModes: [] } } },
-        { op: 'add', component: { id: 'renewal-gateway', kind: 'gateway', label: 'Renewal gateway', group: 'edge', behaviour: { latencyMs: 20, capacityRps: 400, concurrency: 40, failureModes: ['timeout'] } } },
-        { op: 'connect', edge: { from: 'renewal-client', to: 'renewal-gateway', style: 'sync' } },
+        { op: 'add', component: { id: 'rollout-client', kind: 'client', label: 'Rollout client', group: 'edge', behaviour: { latencyMs: 30, capacityRps: 200, failureModes: [] } } },
+        { op: 'add', component: { id: 'rollout-gateway', kind: 'gateway', label: 'Rollout gateway', group: 'edge', behaviour: { latencyMs: 20, capacityRps: 400, concurrency: 40, failureModes: ['timeout'] } } },
+        { op: 'connect', edge: { from: 'rollout-client', to: 'rollout-gateway', style: 'sync' } },
       ],
     },
     {
-      why: 'Policy service',
+      why: 'Release service',
       ops: [
-        { op: 'add', component: { id: 'policy-service', kind: 'service', label: 'Policy service', group: 'policy', behaviour: { latencyMs: 70, capacityRps: 120, concurrency: 16, failureModes: ['timeout'] }, notes: 'Owns the policy lifecycle.' } },
-        { op: 'connect', edge: { from: 'renewal-gateway', to: 'policy-service', style: 'sync', label: 'POST /renewals' } },
+        { op: 'add', component: { id: 'release-service', kind: 'service', label: 'Release service', group: 'release', behaviour: { latencyMs: 70, capacityRps: 120, concurrency: 16, failureModes: ['timeout'] }, notes: 'Owns the release lifecycle.' } },
+        { op: 'connect', edge: { from: 'rollout-gateway', to: 'release-service', style: 'sync', label: 'POST /promotions' } },
       ],
     },
     {
-      why: 'Billing',
+      why: 'Notify',
       ops: [
-        { op: 'add', component: { id: 'billing-service', kind: 'service', label: 'Billing service', group: 'policy', behaviour: { latencyMs: 90, capacityRps: 80, concurrency: 12, failureModes: ['timeout'] } } },
-        { op: 'connect', edge: { from: 'policy-service', to: 'billing-service', style: 'sync' } },
+        { op: 'add', component: { id: 'notify-service', kind: 'service', label: 'Notify service', group: 'release', behaviour: { latencyMs: 90, capacityRps: 80, concurrency: 12, failureModes: ['timeout'] } } },
+        { op: 'connect', edge: { from: 'release-service', to: 'notify-service', style: 'sync' } },
       ],
     },
     {
       why: 'Notice queue',
       ops: [
-        { op: 'add', component: { id: 'notice-queue', kind: 'queue', label: 'Notice queue', group: 'policy', behaviour: { latencyMs: 6, capacityRps: 1000, failureModes: [] } } },
-        { op: 'connect', edge: { from: 'policy-service', to: 'notice-queue', style: 'event', label: 'RenewalDue' } },
+        { op: 'add', component: { id: 'notice-queue', kind: 'queue', label: 'Notice queue', group: 'release', behaviour: { latencyMs: 6, capacityRps: 1000, failureModes: [] } } },
+        { op: 'connect', edge: { from: 'release-service', to: 'notice-queue', style: 'event', label: 'PromotionDue' } },
       ],
     },
     {
@@ -82,78 +84,78 @@ async function policyRenewal(store: SessionStore): Promise<void> {
       ops: [
         {
           op: 'update',
-          id: 'policy-service',
+          id: 'release-service',
           patch: {
             machine: {
-              initial: 'active',
+              initial: 'staged',
               states: [
-                { id: 'active', label: 'Active' },
+                { id: 'staged', label: 'Staged' },
                 { id: 'due', label: 'Due' },
-                { id: 'renewed', label: 'Renewed' },
-                { id: 'lapsed', label: 'Lapsed' },
+                { id: 'promoted', label: 'Promoted' },
+                { id: 'rolled-back', label: 'Rolled back' },
               ],
               transitions: [
-                { from: 'active', to: 'due', on: 'Term ending' },
-                { from: 'due', to: 'renewed', on: 'Bind renewal' },
-                { from: 'due', to: 'lapsed', on: 'Grace ends' },
+                { from: 'staged', to: 'due', on: 'Window opening' },
+                { from: 'due', to: 'promoted', on: 'Promote' },
+                { from: 'due', to: 'rolled-back', on: 'Window ends' },
               ],
             },
           },
         },
-        { op: 'focus', id: 'policy-service' },
+        { op: 'focus', id: 'release-service' },
       ],
     },
   ]
   for (const batch of batches) await store.applyOps(session, batch.ops, batch.why)
   await store.decide(session, {
-    chose: 'Renewal is a state machine, not a new policy',
-    because: 'Lapse and reinstatement need a named transition',
-    affects: ['policy-service'],
-    rejected: ['Create a fresh policy on every term'],
+    chose: 'Promotion is a state machine, not a new release',
+    because: 'Rollback and republish need a named transition',
+    affects: ['release-service'],
+    rejected: ['Create a fresh release on every channel'],
   })
   await store.save(session)
 }
 
-async function claimsFnol(store: SessionStore): Promise<void> {
+async function reviewIntake(store: SessionStore): Promise<void> {
   const session = await store.create({
-    title: 'Claims FNOL intake',
+    title: 'Dependency review intake',
     mode: 'blank',
     at: '2026-10-14T10:00:00.000Z',
     sample: true,
   })
   const batches: { why: string; ops: PatchOp[] }[] = [
     {
-      why: 'Intake form and gateway',
+      why: 'Review console and gateway',
       ops: [
-        { op: 'add', component: { id: 'fnol-form', kind: 'client', label: 'FNOL form', group: 'edge', behaviour: { latencyMs: 40, capacityRps: 100, failureModes: [] } } },
-        { op: 'add', component: { id: 'claims-gateway', kind: 'gateway', label: 'Claims gateway', group: 'edge', behaviour: { latencyMs: 22, capacityRps: 300, concurrency: 40, failureModes: ['timeout'] } } },
-        { op: 'connect', edge: { from: 'fnol-form', to: 'claims-gateway', style: 'sync', label: 'POST /fnol' } },
+        { op: 'add', component: { id: 'review-console', kind: 'client', label: 'Review console', group: 'edge', behaviour: { latencyMs: 40, capacityRps: 100, failureModes: [] } } },
+        { op: 'add', component: { id: 'review-gateway', kind: 'gateway', label: 'Review gateway', group: 'edge', behaviour: { latencyMs: 22, capacityRps: 300, concurrency: 40, failureModes: ['timeout'] } } },
+        { op: 'connect', edge: { from: 'review-console', to: 'review-gateway', style: 'sync', label: 'POST /reviews' } },
       ],
     },
     {
-      why: 'Claims service',
+      why: 'Review service',
       ops: [
-        { op: 'add', component: { id: 'claims-service', kind: 'service', label: 'Claims service', group: 'claims', behaviour: { latencyMs: 110, capacityRps: 80, concurrency: 24, failureModes: ['timeout'] }, notes: 'Opens a claim from first notice.' } },
-        { op: 'connect', edge: { from: 'claims-gateway', to: 'claims-service', style: 'sync' } },
-        { op: 'focus', id: 'claims-service' },
+        { op: 'add', component: { id: 'review-service', kind: 'service', label: 'Review service', group: 'reviews', behaviour: { latencyMs: 110, capacityRps: 80, concurrency: 24, failureModes: ['timeout'] }, notes: 'Opens a review from a dependency scan.' } },
+        { op: 'connect', edge: { from: 'review-gateway', to: 'review-service', style: 'sync' } },
+        { op: 'focus', id: 'review-service' },
       ],
     },
     {
-      why: 'Documents and fraud queue',
+      why: 'Reports and advisory queue',
       ops: [
-        { op: 'add', component: { id: 'document-store', kind: 'store', label: 'Document store', group: 'claims', behaviour: { latencyMs: 15, capacityRps: 200, failureModes: [] } } },
-        { op: 'add', component: { id: 'fraud-queue', kind: 'queue', label: 'Fraud queue', group: 'claims', behaviour: { latencyMs: 8, capacityRps: 500, failureModes: [] } } },
-        { op: 'connect', edge: { from: 'claims-service', to: 'document-store', style: 'sync' } },
-        { op: 'connect', edge: { from: 'claims-service', to: 'fraud-queue', style: 'async', label: 'FraudFlagged' } },
+        { op: 'add', component: { id: 'report-store', kind: 'store', label: 'Report store', group: 'reviews', behaviour: { latencyMs: 15, capacityRps: 200, failureModes: [] } } },
+        { op: 'add', component: { id: 'advisory-queue', kind: 'queue', label: 'Advisory queue', group: 'reviews', behaviour: { latencyMs: 8, capacityRps: 500, failureModes: [] } } },
+        { op: 'connect', edge: { from: 'review-service', to: 'report-store', style: 'sync' } },
+        { op: 'connect', edge: { from: 'review-service', to: 'advisory-queue', style: 'async', label: 'AdvisoryFlagged' } },
       ],
     },
   ]
   for (const batch of batches) await store.applyOps(session, batch.ops, batch.why)
   await store.decide(session, {
-    chose: 'Fraud review is async',
+    chose: 'Advisory review is async',
     because: 'Intake should not wait on a manual screen',
-    affects: ['fraud-queue', 'claims-service'],
-    rejected: ['Synchronous fraud check on submit'],
+    affects: ['advisory-queue', 'review-service'],
+    rejected: ['Synchronous advisory check on submit'],
   })
   await store.save(session)
 }

@@ -17,7 +17,7 @@ export function narrateSimulation(scene: Scene, result: SimResult): string[] {
     return [
       `Stepping the ${component} state machine.`,
       'Arrow keys advance one transition. The lit state is the only one that matters.',
-      'Nothing here is live. It is the shape of the machine, not a policy record.',
+      'Nothing here is live. It is the shape of the machine, not a production deploy.',
     ]
   }
   const bottleneck = name(result.summary.bottleneck)
@@ -34,8 +34,8 @@ function mitigation(scene: Scene, result: SimResult): string {
   const id = result.summary.bottleneck
   const component = scene.components.find((c) => c.id === id)
   if (!component) return 'Want me to tidy the scene and re-run?'
-  if (id.includes('rating') || id.includes('partner') || component.kind === 'external') {
-    return 'Want me to bulkhead the partner call and re-run?'
+  if (id.includes('compile') || id.includes('registry') || component.kind === 'external') {
+    return 'Want me to bulkhead the registry call and re-run?'
   }
   if (component.kind === 'queue') return 'The queue is absorbing the spike. Want me to add a consumer and re-run?'
   return `Want me to raise capacity on ${component.label} and re-run?`
